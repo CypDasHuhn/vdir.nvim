@@ -1,5 +1,5 @@
 return {
-	"yourusername/vdir.nvim",
+	"CypDasHuhn/vdir.nvim",
 	dependencies = {
 		"nvim-neo-tree/neo-tree.nvim",
 		"MunifTanjim/nui.nvim",
