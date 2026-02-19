@@ -2,6 +2,11 @@
 
 Virtual directories for Neovim. Create custom folder structures based on grep patterns.
 
+## Disclosure
+
+This project was largely written by AI.
+I'm not going to pretend it isn't.
+
 ## Features
 
 - Define virtual folders and queries in `.vdir.toml`
