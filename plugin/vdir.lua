@@ -13,8 +13,13 @@ require("neo-tree").setup({
 			["<S-Tab>"] = "prev_source",
 		},
 	},
+	vdir = {},
 })
 
 vim.api.nvim_create_user_command("Vdir", function()
 	require("neo-tree.command").execute({ source = "vdir", toggle = true })
 end, {})
+
+vim.keymap.set("n", "<leader>q", function()
+	require("neo-tree.command").execute({ source = "vdir", toggle = true })
+end, { desc = "Toggle Vdir" })
