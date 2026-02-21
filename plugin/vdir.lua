@@ -1,5 +1,5 @@
 require("neo-tree").setup({
-	sources = { "filesystem", "vdir" },
+	sources = { "filesystem", "buffers", "git_status", "vdir" },
 	source_selector = {
 		winbar = true,
 		sources = {
