@@ -34,12 +34,16 @@ end
 ---@return string|nil
 function M.find_config(start_path)
 	local path = start_path
-	while path and path ~= "/" do
+	while path do
 		local config_path = path .. "/.vdir.toml"
 		if vim.fn.filereadable(config_path) == 1 then
 			return config_path
 		end
-		path = vim.fn.fnamemodify(path, ":h")
+		local parent = vim.fn.fnamemodify(path, ":h")
+		if parent == path then
+			break
+		end
+		path = parent
 	end
 	return nil
 end
