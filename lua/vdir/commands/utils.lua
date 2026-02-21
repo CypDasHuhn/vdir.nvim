@@ -1,6 +1,7 @@
 local config = require("vdir.config")
 local writer = require("vdir.writer")
 local manager = require("neo-tree.sources.manager")
+local path = require("vdir.path")
 
 local M = {}
 
@@ -118,7 +119,7 @@ end
 function M.save_and_refresh(state, cfg, message)
 	local config_path = M.get_config_path(state)
 	if not config_path then
-		config_path = (state.path or vim.fn.getcwd()) .. "/.vdir.toml"
+		config_path = path.join(state.path or vim.fn.getcwd(), ".vdir.toml")
 	end
 
 	local ok, write_err = writer.write(cfg, config_path)

@@ -1,6 +1,7 @@
 local renderer = require("neo-tree.ui.renderer")
 local config = require("vdir.config")
 local grep = require("vdir.grep")
+local path = require("vdir.path")
 
 local M = {}
 
@@ -37,10 +38,7 @@ local function build_folder_node(folder, folder_id, cwd)
 
 			for _, file in ipairs(files) do
 				-- Make path relative to cwd for display
-				local display_name = file
-				if file:sub(1, #cwd) == cwd then
-					display_name = file:sub(#cwd + 2)
-				end
+				local display_name = path.relpath(file, cwd) or file
 
 				table.insert(query_node.children, {
 					id = query_id .. "_" .. file,

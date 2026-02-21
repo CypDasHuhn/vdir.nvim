@@ -1,6 +1,7 @@
 local Layout = require("nui.layout")
 local Popup = require("nui.popup")
 local grep = require("vdir.grep")
+local path = require("vdir.path")
 
 local M = {}
 
@@ -112,10 +113,7 @@ local function run_preview(patterns_str, filetypes_str, is_regex, cwd)
 			if not seen[file] then
 				seen[file] = true
 				-- Make relative
-				local display = file
-				if file:sub(1, #cwd) == cwd then
-					display = file:sub(#cwd + 2)
-				end
+				local display = path.relpath(file, cwd) or file
 				table.insert(all_files, display)
 			end
 		end
