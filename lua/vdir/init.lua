@@ -142,6 +142,22 @@ M.default_config = {
 	window = {
 		mappings = mappings,
 	},
+	renderers = {
+		directory = {
+			{ "indent" },
+			{ "icon" },
+			{ "name" },
+		},
+		file = {
+			{ "indent" },
+			{ "icon" },
+			{ "name" },
+		},
+		message = {
+			{ "indent", with_markers = false },
+			{ "name", highlight = "NeoTreeMessage" },
+		},
+	},
 }
 
 return M
