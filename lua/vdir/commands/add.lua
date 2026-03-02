@@ -38,6 +38,7 @@ end
 ---@return boolean success
 ---@return string|nil error
 local function add_folder_to_config(cfg, folder_path, name)
+	cfg.folder = cfg.folder or {}
 	if utils.name_exists_at_parent(cfg, folder_path, name) then
 		return false, "An item with name '" .. name .. "' already exists"
 	end
@@ -72,6 +73,7 @@ function M.add(state)
 	if not cfg then
 		cfg = { folder = {} }
 	end
+	cfg.folder = cfg.folder or {}
 
 	local folder_path, _ = utils.parse_node_id(node_id)
 
@@ -134,6 +136,7 @@ function M.add_folder(state)
 	if not cfg then
 		cfg = { folder = {} }
 	end
+	cfg.folder = cfg.folder or {}
 
 	local folder_path, _ = utils.parse_node_id(node_id)
 
