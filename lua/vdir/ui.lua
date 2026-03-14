@@ -3,9 +3,10 @@ local NuiInput = require("nui.input")
 local M = {}
 
 ---@class QueryData
----@field name string
----@field pattern string
----@field glob string|nil
+---@field cmd string|nil
+---@field scope string|nil
+---@field shell_program string|nil
+---@field shell_execute_arg string|nil
 
 ---Create popup options for cursor-relative input (like neo-tree)
 ---@param title string
@@ -108,11 +109,9 @@ local function parse_buffer(bufnr)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local data = {}
 	for _, line in ipairs(lines) do
-		local key, value = line:match("^(%w+):%s*(.*)$")
+		local key, value = line:match("^([%w_]+):%s*(.*)$")
 		if key and value then
-			if value ~= "" then
-				data[key] = value
-			end
+			data[key] = value
 		end
 	end
 	return data
@@ -121,14 +120,21 @@ end
 ---Show query viewer/editor
 ---@param query QueryData
 ---@param on_save fun(data: QueryData)|nil
-function M.show_query(query, on_save)
+---@param opts? {title?: string}
+function M.show_query(query, on_save, opts)
+	opts = opts or {}
 	local lines = {
-		"name: " .. (query.name or ""),
-		"pattern: " .. (query.pattern or ""),
-		"glob: " .. (query.glob or ""),
+		"cmd: " .. (query.cmd or ""),
+		"scope: " .. (query.scope or "."),
+		"shell_program: " .. (query.shell_program or ""),
+		"shell_execute_arg: " .. (query.shell_execute_arg or ""),
 	}
 
-	local bufnr, winnr = create_float(lines, { title = " Query ", width = 50, height = 5 })
+	local bufnr, winnr = create_float(lines, {
+		title = opts.title or " Query ",
+		width = 80,
+		height = 6,
+	})
 
 	-- Close on q or Escape
 	vim.keymap.set("n", "q", function()
@@ -151,6 +157,8 @@ function M.show_query(query, on_save)
 	vim.keymap.set("n", "<CR>", save, { buffer = bufnr })
 	vim.keymap.set("n", "<C-s>", save, { buffer = bufnr })
 	vim.keymap.set("i", "<C-s>", save, { buffer = bufnr })
+
+	vim.cmd("startinsert!")
 end
 
 return M

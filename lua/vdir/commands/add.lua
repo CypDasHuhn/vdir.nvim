@@ -3,150 +3,113 @@ local utils = require("vdir.commands.utils")
 
 local M = {}
 
----Check if the current node is a valid parent for adding items
----@param node_id string
----@return boolean is_valid
----@return string|nil error_message
-local function is_valid_parent(node_id)
-	if not node_id then
-		return false, "No node selected"
+local function get_parent_marker(node)
+	if not node then
+		return "~"
 	end
 
-	-- Root is always valid
-	if node_id == "root" then
-		return true, nil
+	local ctx, err = utils.get_node_context(node)
+	if not ctx then
+		return nil, err
 	end
 
-	-- Check if this is a file (contains _query_ and has a file path after it)
-	if node_id:match("_query_%d+_.+") then
-		return false, "Cannot add items to a file"
+	if ctx.item_type == "root" or ctx.item_type == "folder" then
+		return ctx.marker
 	end
 
-	-- Check if this is a query node (ends with _query_N)
-	if node_id:match("_query_%d+$") then
-		return false, "Cannot add items to a query"
-	end
-
-	-- It's a folder
-	return true, nil
+	return nil, "Select a folder to add items"
 end
 
----Add a folder at the given path
----@param cfg VdirConfig
----@param folder_path number[]
----@param name string
----@return boolean success
----@return string|nil error
-local function add_folder_to_config(cfg, folder_path, name)
-	cfg.folder = cfg.folder or {}
-	if utils.name_exists_at_parent(cfg, folder_path, name) then
-		return false, "An item with name '" .. name .. "' already exists"
+local function create_folder(state, marker, name)
+	local result = utils.run_at_marker_or_notify(state, marker, { "mkdir", name })
+	if not result then
+		return
 	end
+	vim.notify(result.stdout ~= "" and result.stdout or "folder created", vim.log.levels.INFO)
+	utils.refresh(state)
+end
 
-	if #folder_path == 0 then
-		-- At root level
-		table.insert(cfg.folder, { name = name, query = {}, folder = {} })
-	else
-		-- Inside a folder, add as subfolder
-		local parent = utils.get_folder_at_path(cfg, folder_path)
-		if parent then
-			parent.folder = parent.folder or {}
-			table.insert(parent.folder, { name = name, query = {}, folder = {} })
+local function create_query(state, marker, name)
+	ui.show_query({
+		cmd = "",
+		scope = ".",
+		shell_program = "",
+		shell_execute_arg = "",
+	}, function(data)
+		local cmd = vim.trim(data.cmd or "")
+		if cmd == "" then
+			vim.notify("Command cannot be empty", vim.log.levels.ERROR)
+			return
 		end
-	end
-	return true, nil
+
+		local scope = vim.trim(data.scope or "")
+		if scope == "" then
+			scope = "."
+		end
+
+		local shell_program = vim.trim(data.shell_program or "")
+		local shell_execute_arg = vim.trim(data.shell_execute_arg or "")
+		local commands = {
+			{ "mkq", name, cmd },
+		}
+
+		if scope ~= "." then
+			table.insert(commands, { "set", name, "scope", scope })
+		end
+
+		if shell_program ~= "" then
+			local shell_cmd = { "set", name, "shell", shell_program }
+			if shell_execute_arg ~= "" then
+				table.insert(shell_cmd, shell_execute_arg)
+			end
+			table.insert(commands, shell_cmd)
+		end
+
+		local result = utils.run_sequence_at_marker_or_notify(state, marker, commands)
+		if not result then
+			return
+		end
+
+		vim.notify(result.stdout ~= "" and result.stdout or "query created", vim.log.levels.INFO)
+		utils.refresh(state)
+	end, { title = " New Query " })
 end
 
----Add command: folder if ends with /, otherwise query
----@param state table
 function M.add(state)
 	local node = state.tree:get_node()
-	local node_id = node and node:get_id() or "root"
-
-	local valid, err = is_valid_parent(node_id)
-	if not valid then
+	local marker, err = get_parent_marker(node)
+	if not marker then
 		vim.notify(err, vim.log.levels.ERROR)
 		return
 	end
 
-	local cfg, _ = utils.get_config(state)
-	if not cfg then
-		cfg = { folder = {} }
-	end
-	cfg.folder = cfg.folder or {}
-
-	local folder_path, _ = utils.parse_node_id(node_id)
-
 	ui.cursor_input("Name (end with / for folder)", "", function(value)
-		if value:sub(-1) == "/" then
-			-- Create folder
-			local name = value:sub(1, -2)
-			local ok, add_err = add_folder_to_config(cfg, folder_path, name)
-			if not ok then
-				vim.notify(add_err, vim.log.levels.ERROR)
-				return
-			end
-			utils.save_and_refresh(state, cfg, "folder created")
-		else
-			-- Create query - need pattern
-			if #folder_path == 0 then
-				vim.notify("Select a folder first to add a query", vim.log.levels.WARN)
-				return
-			end
-
-			local query_name = value
-			if utils.name_exists_at_parent(cfg, folder_path, query_name) then
-				vim.notify("An item with name '" .. query_name .. "' already exists", vim.log.levels.ERROR)
-				return
-			end
-
-			ui.cursor_input("Pattern", "", function(pattern)
-				ui.cursor_input("Glob (optional)", "", function(glob)
-					local folder = utils.get_folder_at_path(cfg, folder_path)
-					if not folder then
-						vim.notify("Could not find folder", vim.log.levels.WARN)
-						return
-					end
-					folder.query = folder.query or {}
-					table.insert(folder.query, {
-						name = query_name,
-						pattern = pattern,
-						glob = glob ~= "" and glob or nil,
-					})
-					utils.save_and_refresh(state, cfg, "query created")
-				end)
-			end)
+		if value == "" then
+			return
 		end
+
+		if value:sub(-1) == "/" then
+			create_folder(state, marker, value:sub(1, -2))
+			return
+		end
+
+		create_query(state, marker, value)
 	end)
 end
 
----Add folder command (always creates folder)
----@param state table
 function M.add_folder(state)
 	local node = state.tree:get_node()
-	local node_id = node and node:get_id() or "root"
-
-	local valid, err = is_valid_parent(node_id)
-	if not valid then
+	local marker, err = get_parent_marker(node)
+	if not marker then
 		vim.notify(err, vim.log.levels.ERROR)
 		return
 	end
 
-	local cfg, _ = utils.get_config(state)
-	if not cfg then
-		cfg = { folder = {} }
-	end
-	cfg.folder = cfg.folder or {}
-
-	local folder_path, _ = utils.parse_node_id(node_id)
-
 	ui.cursor_input("Folder name", "", function(name)
-		local ok, add_err = add_folder_to_config(cfg, folder_path, name)
-		if not ok then
-			vim.notify(add_err, vim.log.levels.ERROR)
+		if name == "" then
 			return
 		end
-		utils.save_and_refresh(state, cfg, "folder created")
+		create_folder(state, marker, name)
 	end)
 end
 

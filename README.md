@@ -1,18 +1,16 @@
 # vdir.nvim
 
-Virtual directories for Neovim. Create custom folder structures based on grep patterns.
+Neo-tree source for `vdir`.
 
-## Disclosure
+The plugin is a thin UI wrapper around `vdir-cli`. It does not own query
+storage or execution logic anymore. `vdir` remains the source of truth for the
+virtual tree, marker state, supplier scopes, and shell execution.
 
-This project was largely written by AI.
-I'm not going to pretend it isn't.
+## Requirements
 
-## Features
-
-- Define virtual folders and queries in `.vdir.toml`
-- Pattern matching with live preview
-- Nested folder support
-- Neo-tree integration
+- [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim)
+- [nui.nvim](https://github.com/MunifTanjim/nui.nvim)
+- `vdir` or `vdir_cli` in `PATH`
 
 ## Installation
 
@@ -29,47 +27,38 @@ I'm not going to pretend it isn't.
 }
 ```
 
+If your CLI binary is not available as `vdir` or `vdir_cli`, set:
+
+```lua
+vim.g.vdir_cli_cmd = "path/to/vdir"
+```
+
+## Behavior
+
+- The tree is loaded from `vdir ls -lr`
+- Folder, query, rename, and delete actions call `vdir` commands directly
+- Query editing is command and shell agnostic:
+  - `cmd`
+  - `scope`
+  - `shell_program`
+  - `shell_execute_arg`
+
+The plugin does not interpret query syntax. It only sends raw command strings to
+`vdir`.
+
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `a` | Add item (folder if ends with `/`, otherwise query) |
+| `a` | Add item (folder if name ends with `/`, otherwise query) |
 | `A` | Add folder |
 | `d` | Delete folder/query |
 | `r` | Rename folder/query |
-| `e` | Edit query (opens editor) |
+| `e` | Edit query |
 
-### Query Editor
+## Current limits
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Next field |
-| `Shift-Tab` | Previous field |
-| `Ctrl-r` | Toggle regex mode |
-| `Enter` | Save |
-| `Esc` | Cancel |
-
-## Configuration
-
-Creates `.vdir.toml` in your project root:
-
-```toml
-[[folder]]
-name = "Code Quality"
-
-[[folder.query]]
-name = "TODOs"
-pattern = "TODO, FIXME"
-glob = "**/*.lua"
-
-[[folder.query]]
-name = "Debug"
-pattern = "print, console.log"
-regex = true
-```
-
-## Requirements
-
-- [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim)
-- [nui.nvim](https://github.com/MunifTanjim/nui.nvim)
-- [ripgrep](https://github.com/BurntSushi/ripgrep)
+- The edit UI currently targets the default supplier only
+- Queries that use only named suppliers or multiple supplier-specific configs
+  are not editable from the plugin yet
+- Query result nodes are read-only

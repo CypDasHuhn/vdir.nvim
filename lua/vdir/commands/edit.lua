@@ -1,196 +1,141 @@
 local ui = require("vdir.ui")
-local query_editor = require("vdir.ui.query_editor")
-local writer = require("vdir.writer")
 local utils = require("vdir.commands.utils")
 
 local M = {}
 
----Check if node is renameable (folder or query, not root or file)
----@param node_id string
----@return boolean is_valid
----@return string|nil error_message
----@return string|nil item_type
-local function is_renameable(node_id)
-	if not node_id then
-		return false, "No node selected", nil
+local function get_editable_supplier(info)
+	if not info then
+		return nil, "Could not read query info"
 	end
 
-	if node_id == "root" then
-		return false, "Cannot rename Root", nil
+	if info.supplier_count == 0 then
+		return {
+			cmd = "",
+			scope = ".",
+			shell_program = "",
+			shell_execute_arg = "",
+		}, nil
 	end
 
-	-- Check if this is a file
-	if node_id:match("_query_%d+_.+") then
-		return false, "Cannot rename query result files", nil
+	if info.default_supplier then
+		return {
+			cmd = info.default_supplier.cmd or "",
+			scope = info.default_supplier.scope or ".",
+			shell_program = info.default_supplier.shell_program or "",
+			shell_execute_arg = info.default_supplier.shell_execute_arg or "",
+		}, nil
 	end
 
-	-- Check if this is a query
-	if node_id:match("_query_%d+$") then
-		return true, nil, "query"
+	if info.supplier_count == 1 then
+		return nil, "Query uses a named supplier and cannot be edited here yet"
 	end
 
-	-- It's a folder
-	return true, nil, "folder"
+	return nil, "Query uses multiple suppliers and cannot be edited here yet"
 end
 
----Check if node is a query (for editing)
----@param node_id string
----@return boolean is_valid
----@return string|nil error_message
-local function is_editable_query(node_id)
-	if not node_id then
-		return false, "No node selected"
-	end
-
-	if node_id == "root" then
-		return false, "Cannot edit Root"
-	end
-
-	if node_id:match("_query_%d+_.+") then
-		return false, "Cannot edit files"
-	end
-
-	if not node_id:match("_query_%d+$") then
-		return false, "Select a query to edit"
-	end
-
-	return true, nil
-end
-
----Convert filetypes string to glob
----@param filetypes_str string
----@return string|nil
-local function filetypes_to_glob(filetypes_str)
-	if not filetypes_str or filetypes_str == "" then
-		return nil
-	end
-	-- Parse comma-separated
-	local types = {}
-	for t in filetypes_str:gmatch("[^,]+") do
-		local trimmed = t:match("^%s*(.-)%s*$")
-		if trimmed ~= "" then
-			table.insert(types, trimmed)
-		end
-	end
-	if #types == 0 then
-		return nil
-	end
-	if #types == 1 then
-		return "**/*." .. types[1]
-	end
-	return "**/*.{" .. table.concat(types, ",") .. "}"
-end
-
----Rename command (for folders and queries)
----@param state table
 function M.rename(state)
 	local node = state.tree:get_node()
-	if not node then
-		return
-	end
-
-	local node_id = node:get_id()
-	local node_name = node.name
-
-	local valid, err, item_type = is_renameable(node_id)
-	if not valid then
+	local ctx, err = utils.get_node_context(node)
+	if not ctx then
 		vim.notify(err, vim.log.levels.ERROR)
 		return
 	end
 
-	local cfg, cfg_err = utils.get_config(state)
-	if not cfg then
-		vim.notify(cfg_err or "No config found", vim.log.levels.ERROR)
+	if ctx.item_type == "root" then
+		vim.notify("Cannot rename Root", vim.log.levels.ERROR)
 		return
 	end
 
-	local folder_path, query_idx = utils.parse_node_id(node_id)
+	local current_name = ctx.query_name or ctx.item_name or node.name
+	local parent_marker = ctx.parent_marker
+	if not parent_marker then
+		vim.notify("Could not determine parent folder", vim.log.levels.ERROR)
+		return
+	end
 
-	ui.cursor_input("Rename", node_name, function(new_name)
-		if new_name == node_name then
+	ui.cursor_input("Rename", current_name, function(new_name)
+		if new_name == "" or new_name == current_name then
 			return
 		end
 
-		-- Check for duplicate
-		local check_path = folder_path
-		if item_type == "folder" then
-			check_path = utils.get_parent_path(folder_path)
-		end
-		if utils.name_exists_at_parent(cfg, check_path, new_name) then
-			vim.notify("An item with name '" .. new_name .. "' already exists", vim.log.levels.ERROR)
+		local result = utils.run_at_marker_or_notify(state, parent_marker, {
+			"mv",
+			current_name,
+			new_name,
+		})
+		if not result then
 			return
 		end
 
-		if item_type == "query" then
-			local folder = utils.get_folder_at_path(cfg, folder_path)
-			if folder and folder.query and query_idx then
-				folder.query[query_idx].name = new_name
-			end
-		elseif item_type == "folder" then
-			local folder = utils.get_folder_at_path(cfg, folder_path)
-			if folder then
-				folder.name = new_name
-			end
-		end
-
-		utils.save_and_refresh(state, cfg, item_type .. " renamed")
+		vim.notify(result.stdout ~= "" and result.stdout or "item renamed", vim.log.levels.INFO)
+		utils.refresh(state)
 	end)
 end
 
----Edit query command (opens the query editor)
----@param state table
 function M.edit(state)
 	local node = state.tree:get_node()
-	if not node then
-		return
-	end
-
-	local node_id = node:get_id()
-
-	local valid, err = is_editable_query(node_id)
-	if not valid then
+	local ctx, err = utils.get_node_context(node)
+	if not ctx then
 		vim.notify(err, vim.log.levels.ERROR)
 		return
 	end
 
-	local cfg, cfg_err = utils.get_config(state)
-	if not cfg then
-		vim.notify(cfg_err or "No config found", vim.log.levels.ERROR)
+	if ctx.item_type ~= "query" then
+		vim.notify("Select a query to edit", vim.log.levels.ERROR)
 		return
 	end
 
-	local folder_path, query_idx = utils.parse_node_id(node_id)
-	local folder = utils.get_folder_at_path(cfg, folder_path)
-
-	if not folder or not folder.query or not query_idx then
-		vim.notify("Could not find query", vim.log.levels.ERROR)
+	local info, info_err = utils.read_query_info(state, ctx.parent_marker, ctx.query_name)
+	if not info then
+		vim.notify(info_err or "Could not read query info", vim.log.levels.ERROR)
 		return
 	end
 
-	local query = folder.query[query_idx]
-	local cwd = state.path or vim.fn.getcwd()
+	local query_data, query_err = get_editable_supplier(info)
+	if not query_data then
+		vim.notify(query_err, vim.log.levels.ERROR)
+		return
+	end
 
-	query_editor.open(query, cwd, function(data)
-		-- Update query
-		query.pattern = data.pattern
-		query.glob = filetypes_to_glob(data.filetypes)
-		query.regex = data.regex
-
-		-- Save
-		local config_path = utils.get_config_path(state)
-		if config_path then
-			local ok, write_err = writer.write(cfg, config_path)
-			if ok then
-				vim.notify("Query updated", vim.log.levels.INFO)
-				utils.refresh(state)
-			else
-				vim.notify(write_err or "Failed to save", vim.log.levels.ERROR)
-			end
+	ui.show_query(query_data, function(data)
+		local cmd = vim.trim(data.cmd or "")
+		if cmd == "" then
+			vim.notify("Command cannot be empty", vim.log.levels.ERROR)
+			return
 		end
-	end)
+
+		local scope = vim.trim(data.scope or "")
+		if scope == "" then
+			scope = "."
+		end
+
+		local shell_program = vim.trim(data.shell_program or "")
+		local shell_execute_arg = vim.trim(data.shell_execute_arg or "")
+		local commands = {
+			{ "set", ctx.query_name, "cmd", cmd },
+			{ "set", ctx.query_name, "scope", scope },
+		}
+
+		if shell_program == "" then
+			table.insert(commands, { "set", ctx.query_name, "shell", "clear" })
+		else
+			local shell_cmd = { "set", ctx.query_name, "shell", shell_program }
+			if shell_execute_arg ~= "" then
+				table.insert(shell_cmd, shell_execute_arg)
+			end
+			table.insert(commands, shell_cmd)
+		end
+
+		local result = utils.run_sequence_at_marker_or_notify(state, ctx.parent_marker, commands)
+		if not result then
+			return
+		end
+
+		vim.notify(result.stdout ~= "" and result.stdout or "query updated", vim.log.levels.INFO)
+		utils.refresh(state)
+	end, { title = " Edit Query " })
 end
 
--- Keep old view_query as alias for backward compat
 M.view_query = M.edit
 
 return M

@@ -1,90 +1,125 @@
 local renderer = require("neo-tree.ui.renderer")
-local config = require("vdir.config")
-local grep = require("vdir.grep")
-local path = require("vdir.path")
+local cli = require("vdir.cli")
 
 local M = {}
 
 M.name = "vdir"
 M.display_name = "Vdir"
 
----Build folder node recursively
----@param folder VdirFolder
----@param folder_id string
----@param cwd string
----@return table
-local function build_folder_node(folder, folder_id, cwd)
-	local folder_node = {
-		id = folder_id,
-		name = folder.name,
-		type = "directory",
-		children = {},
-	}
-
-	-- Add queries
-	if folder.query then
-		for query_idx, query in ipairs(folder.query) do
-			local query_id = folder_id .. "_query_" .. query_idx
-			local query_node = {
-				id = query_id,
-				name = query.name,
-				type = "directory",
-				extra = { is_query = true },
-				children = {},
-			}
-
-			-- Run grep to find matching files
-			local files = grep.find_files(query.pattern, query.glob, cwd, query.regex)
-
-			for _, file in ipairs(files) do
-				-- Make path relative to cwd for display
-				local display_name = path.relpath(file, cwd) or file
-
-				table.insert(query_node.children, {
-					id = query_id .. "_" .. file,
-					name = display_name,
-					type = "file",
-					path = file, -- Store full path for opening
-				})
-			end
-
-			table.insert(folder_node.children, query_node)
-		end
+local function join_vdir_path(parent, name)
+	if parent == "~" then
+		return "~/" .. name
 	end
-
-	-- Add subfolders
-	if folder.folder then
-		for subfolder_idx, subfolder in ipairs(folder.folder) do
-			local subfolder_id = folder_id .. "_folder_" .. subfolder_idx
-			local subfolder_node = build_folder_node(subfolder, subfolder_id, cwd)
-			table.insert(folder_node.children, subfolder_node)
-		end
-	end
-
-	return folder_node
+	return parent .. "/" .. name
 end
 
----Build tree items from config
----@param vdir_config VdirConfig
----@param cwd string
----@return table[]
-local function build_tree(vdir_config, cwd)
-	local root = {
+local function resolve_output_path(cwd, output)
+	if output:match("^%a:[/\\]") or output:match("^/") then
+		return output
+	end
+	return vim.fs.normalize(vim.fs.joinpath(cwd, output))
+end
+
+local function make_root()
+	return {
 		id = "root",
 		name = "Root",
 		type = "directory",
+		extra = {
+			is_root = true,
+			marker = "~",
+		},
 		children = {},
 	}
+end
 
-	if vdir_config.folder then
-		for folder_idx, folder in ipairs(vdir_config.folder) do
-			local folder_id = "folder_" .. folder_idx
-			local folder_node = build_folder_node(folder, folder_id, cwd)
-			table.insert(root.children, folder_node)
+local function parse_tree(lines, cwd)
+	local root = make_root()
+	local stack = {
+		[0] = root,
+	}
+
+	for _, line in ipairs(lines) do
+		local leading = line:match("^(%s*)") or ""
+		local depth = math.floor(#leading / 2)
+		local content = line:sub(#leading + 1)
+		local parent = stack[depth] or root
+		local parent_marker = (parent.extra and parent.extra.marker) or "~"
+
+		local folder_name = content:match("^d (.+)/ %(%d+ items%)$")
+		if folder_name then
+			local marker = join_vdir_path(parent_marker, folder_name)
+			local node = {
+				id = "folder:" .. marker,
+				name = folder_name,
+				type = "directory",
+				extra = {
+					item_type = "folder",
+					marker = marker,
+					parent_marker = parent_marker,
+					item_name = folder_name,
+				},
+				children = {},
+			}
+			table.insert(parent.children, node)
+			stack[depth + 1] = node
+		else
+			local query_name = content:match("^q (.+) %(%d+ suppliers%)$")
+			if query_name then
+				local node = {
+					id = "query:" .. parent_marker .. "::" .. query_name,
+					name = query_name,
+					type = "directory",
+					extra = {
+						item_type = "query",
+						is_query = true,
+						parent_marker = parent_marker,
+						query_name = query_name,
+					},
+					children = {},
+				}
+				table.insert(parent.children, node)
+				stack[depth + 1] = node
+			else
+				local ref_name, target, target_kind = content:match("^r (.-) %-> (.-) %[(.)%]$")
+				if ref_name then
+					table.insert(parent.children, {
+						id = "ref:" .. parent_marker .. "::" .. ref_name,
+						name = ref_name,
+						type = target_kind == "d" and "directory" or "file",
+						path = target,
+						extra = {
+							item_type = "reference",
+							parent_marker = parent_marker,
+							item_name = ref_name,
+							target = target,
+						},
+					})
+				else
+					local result_path = content:match("^f (.+)$")
+					if result_path and parent.extra and parent.extra.is_query then
+						table.insert(parent.children, {
+							id = "result:" .. parent.id .. "::" .. result_path,
+							name = result_path,
+							type = "file",
+							path = resolve_output_path(cwd, result_path),
+							extra = {
+								is_query_result = true,
+							},
+						})
+					end
+				end
+			end
 		end
 	end
 
 	return { root }
+end
+
+local function load_tree(cwd)
+	return cli.with_marker(cwd, "~", function()
+		return cli.run({ "ls", "-lr" }, { cwd = cwd })
+	end)
 end
 
 M.navigate = function(state, path)
@@ -93,17 +128,15 @@ M.navigate = function(state, path)
 	end
 	state.path = path
 
-	local vdir_config, err = config.load(path)
-
+	local result, err = load_tree(path)
 	local items
-	if vdir_config then
-		items = build_tree(vdir_config, path)
+	if result then
+		items = parse_tree(result.lines, path)
 	else
-		-- Show error as a node
 		items = {
 			{
 				id = "error",
-				name = err or "Unknown error loading config",
+				name = err or "Failed to load vdir tree",
 				type = "file",
 			},
 		}
@@ -112,11 +145,9 @@ M.navigate = function(state, path)
 	renderer.show_nodes(items, state)
 end
 
-M.setup = function(cfg, global_config)
-	-- Setup logic here
+M.setup = function(_, _)
 end
 
--- region: disable filesystem bindings
 local disabled_keys = {
 	"<C-b>", "<C-f>", "<C-r>", "<C-x>",
 	"A", "C", "D", "H", "P", "R", "S",
@@ -130,7 +161,6 @@ local mappings = {}
 for _, key in ipairs(disabled_keys) do
 	mappings[key] = "none"
 end
--- endregion
 
 mappings["a"] = "add"
 mappings["A"] = "add_folder"
