@@ -1,3 +1,5 @@
+local cli = require("vdir.cli")
+
 local function ensure_vdir_source()
 	local ok, nt = pcall(require, "neo-tree")
 	if not ok then
@@ -65,14 +67,44 @@ local function ensure_vdir_source()
 	return true
 end
 
-vim.api.nvim_create_user_command("Vdir", function()
-	if ensure_vdir_source() then
-		require("neo-tree.command").execute({ source = "vdir", toggle = true })
+local function ensure_vdir_initialized(cwd, on_ready)
+	local result, err = cli.run({ "pwd" }, { cwd = cwd })
+	if result then
+		on_ready()
+		return
 	end
-end, {})
 
-vim.keymap.set("n", "<leader>q", function()
-	if ensure_vdir_source() then
-		require("neo-tree.command").execute({ source = "vdir", toggle = true })
+	if not err or not err:match("No vdir found") then
+		vim.notify(err or "Failed to inspect vdir state", vim.log.levels.ERROR)
+		return
 	end
-end, { desc = "Toggle Vdir" })
+
+	vim.ui.select({ "Yes", "No" }, {
+		prompt = "No vdir found here. Create one?",
+	}, function(choice)
+		if choice ~= "Yes" then
+			return
+		end
+
+		local init_result, init_err = cli.run({ "init" }, { cwd = cwd })
+		if not init_result then
+			vim.notify(init_err or "Failed to initialize vdir", vim.log.levels.ERROR)
+			return
+		end
+
+		on_ready()
+	end)
+end
+
+local function open_vdir()
+	local cwd = vim.fn.getcwd()
+	if ensure_vdir_source() then
+		ensure_vdir_initialized(cwd, function()
+			require("neo-tree.command").execute({ source = "vdir", toggle = true })
+		end)
+	end
+end
+
+vim.api.nvim_create_user_command("Vdir", open_vdir, {})
+
+vim.keymap.set("n", "<leader>q", open_vdir, { desc = "Toggle Vdir" })

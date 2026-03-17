@@ -1,5 +1,6 @@
 local renderer = require("neo-tree.ui.renderer")
 local cli = require("vdir.cli")
+local unpack_fn = table.unpack or unpack
 
 local M = {}
 
@@ -20,11 +21,26 @@ local function resolve_output_path(cwd, output)
 	return vim.fs.normalize(vim.fs.joinpath(cwd, output))
 end
 
-local function make_root()
+local function resolve_virtual_path(cwd, marker)
+	if marker == "~" then
+		return cwd
+	end
+
+	local relative = marker:gsub("^~/?", "")
+	local parts = { cwd, ".vdir" }
+	for _, segment in ipairs(vim.split(relative, "/", { plain = true, trimempty = true })) do
+		table.insert(parts, segment)
+	end
+
+	return vim.fs.normalize(vim.fs.joinpath(unpack_fn(parts)))
+end
+
+local function make_root(cwd)
 	return {
 		id = "root",
 		name = "Root",
 		type = "directory",
+		path = cwd,
 		extra = {
 			is_root = true,
 			marker = "~",
@@ -34,7 +50,7 @@ local function make_root()
 end
 
 local function parse_tree(lines, cwd)
-	local root = make_root()
+	local root = make_root(cwd)
 	local stack = {
 		[0] = root,
 	}
@@ -53,6 +69,7 @@ local function parse_tree(lines, cwd)
 				id = "folder:" .. marker,
 				name = folder_name,
 				type = "directory",
+				path = resolve_virtual_path(cwd, marker),
 				extra = {
 					item_type = "folder",
 					marker = marker,
@@ -70,6 +87,7 @@ local function parse_tree(lines, cwd)
 					id = "query:" .. parent_marker .. "::" .. query_name,
 					name = query_name,
 					type = "directory",
+					path = resolve_virtual_path(cwd, join_vdir_path(parent_marker, query_name)),
 					extra = {
 						item_type = "query",
 						is_query = true,
@@ -122,27 +140,69 @@ local function load_tree(cwd)
 	end)
 end
 
+local function render_message(state, message)
+	renderer.show_nodes({
+		{
+			id = "message",
+			name = message,
+			type = "message",
+		},
+	}, state)
+end
+
+local function ensure_initialized(state, path, on_ready)
+	local result, err = cli.run({ "pwd" }, { cwd = path })
+	if result then
+		on_ready()
+		return
+	end
+
+	if not err or not err:match("No vdir found") then
+		render_message(state, err or "Failed to load vdir tree")
+		return
+	end
+
+	vim.ui.select({ "Yes", "No" }, {
+		prompt = "No vdir found here. Create one?",
+	}, function(choice)
+		if choice ~= "Yes" then
+			render_message(state, "No vdir found")
+			return
+		end
+
+		local init_result, init_err = cli.run({ "init" }, { cwd = path })
+		if not init_result then
+			render_message(state, init_err or "Failed to initialize vdir")
+			return
+		end
+
+		on_ready()
+	end)
+end
+
 M.navigate = function(state, path)
 	if path == nil then
 		path = vim.fn.getcwd()
 	end
 	state.path = path
 
-	local result, err = load_tree(path)
-	local items
-	if result then
-		items = parse_tree(result.lines, path)
-	else
-		items = {
-			{
-				id = "error",
-				name = err or "Failed to load vdir tree",
-				type = "file",
-			},
-		}
-	end
+	ensure_initialized(state, path, function()
+		local result, err = load_tree(path)
+		local items
+		if result then
+			items = parse_tree(result.lines, path)
+		else
+			items = {
+				{
+					id = "error",
+					name = err or "Failed to load vdir tree",
+					type = "file",
+				},
+			}
+		end
 
-	renderer.show_nodes(items, state)
+		renderer.show_nodes(items, state)
+	end)
 end
 
 M.setup = function(_, _)
