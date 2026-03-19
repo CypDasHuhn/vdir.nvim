@@ -1,4 +1,5 @@
 local ui = require("vdir.ui")
+local query_editor = require("vdir.ui.query_editor")
 local utils = require("vdir.commands.utils")
 
 local M = {}
@@ -30,49 +31,26 @@ local function create_folder(state, marker, name)
 end
 
 local function create_query(state, marker, name)
-	ui.show_query({
-		cmd = "",
-		scope = ".",
-		shell_program = "",
-		shell_execute_arg = "",
-	}, function(data)
-		local cmd = vim.trim(data.cmd or "")
-		if cmd == "" then
-			vim.notify("Command cannot be empty", vim.log.levels.ERROR)
-			return
+	local cwd = utils.get_cwd(state)
+
+	query_editor.open({}, cwd, function(data)
+		local compiler = data.compiler
+		local args = data.args or ""
+
+		-- Create query with compiler
+		local mkq_cmd = { "mkq", name, compiler }
+		if args ~= "" then
+			table.insert(mkq_cmd, args)
 		end
 
-		local scope = vim.trim(data.scope or "")
-		if scope == "" then
-			scope = "."
-		end
-
-		local shell_program = vim.trim(data.shell_program or "")
-		local shell_execute_arg = vim.trim(data.shell_execute_arg or "")
-		local commands = {
-			{ "mkq", name, cmd },
-		}
-
-		if scope ~= "." then
-			table.insert(commands, { "set", name, "scope", scope })
-		end
-
-		if shell_program ~= "" then
-			local shell_cmd = { "set", name, "shell", shell_program }
-			if shell_execute_arg ~= "" then
-				table.insert(shell_cmd, shell_execute_arg)
-			end
-			table.insert(commands, shell_cmd)
-		end
-
-		local result = utils.run_sequence_at_marker_or_notify(state, marker, commands)
+		local result = utils.run_at_marker_or_notify(state, marker, mkq_cmd)
 		if not result then
 			return
 		end
 
 		vim.notify(result.stdout ~= "" and result.stdout or "query created", vim.log.levels.INFO)
 		utils.refresh(state)
-	end, { title = " New Query " })
+	end)
 end
 
 function M.add(state)

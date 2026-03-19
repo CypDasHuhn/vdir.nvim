@@ -1,7 +1,6 @@
 local Layout = require("nui.layout")
 local Popup = require("nui.popup")
-local grep = require("vdir.grep")
-local path = require("vdir.path")
+local cli = require("vdir.cli")
 
 local M = {}
 
@@ -24,161 +23,133 @@ local function debounce(fn, ms)
 	end
 end
 
----Parse comma-separated values (respecting \,)
----@param str string
+---Get list of available compilers
 ---@return string[]
-local function parse_csv(str)
-	local result = {}
-	local current = ""
-	local i = 1
-	while i <= #str do
-		local char = str:sub(i, i)
-		if char == "\\" and str:sub(i + 1, i + 1) == "," then
-			current = current .. ","
-			i = i + 2
-		elseif char == "," then
-			local trimmed = current:match("^%s*(.-)%s*$")
-			if trimmed ~= "" then
-				table.insert(result, trimmed)
-			end
-			current = ""
-			i = i + 1
-		else
-			current = current .. char
-			i = i + 1
+local function get_compilers()
+	local result = cli.run({ "compiler", "list" })
+	if not result then
+		return {}
+	end
+
+	local compilers = {}
+	for _, line in ipairs(result.lines) do
+		-- Parse "  compiler_name (from container_path)"
+		local name = line:match("^%s*(%S+)%s+%(from")
+		if name then
+			table.insert(compilers, name)
 		end
 	end
-	local trimmed = current:match("^%s*(.-)%s*$")
-	if trimmed ~= "" then
-		table.insert(result, trimmed)
-	end
-	return result
+	return compilers
 end
 
----Convert filetypes to glob pattern
----@param filetypes_str string
----@return string|nil
-local function filetypes_to_glob(filetypes_str)
-	if not filetypes_str or filetypes_str == "" then
-		return nil
-	end
-	local types = parse_csv(filetypes_str)
-	if #types == 0 then
-		return nil
-	end
-	if #types == 1 then
-		return "**/*." .. types[1]
-	end
-	return "**/*.{" .. table.concat(types, ",") .. "}"
-end
-
----Convert glob to filetypes string
----@param glob string|nil
----@return string
-local function glob_to_filetypes(glob)
-	if not glob then
-		return ""
-	end
-	-- Parse **/*.{lua,ts,js} or **/*.lua
-	local multi = glob:match("%*%*/%*%.{(.+)}")
-	if multi then
-		return multi:gsub(",", ", ")
-	end
-	local single = glob:match("%*%*/%*%.(.+)")
-	if single then
-		return single
-	end
-	return ""
-end
-
----Run preview search
----@param patterns_str string
----@param filetypes_str string
----@param is_regex boolean
----@param cwd string
+---Run compiler test and get preview
+---@param compiler string
+---@param args string
 ---@return string[]
-local function run_preview(patterns_str, filetypes_str, is_regex, cwd)
-	local patterns = parse_csv(patterns_str)
-	if #patterns == 0 then
-		return { "(no pattern)" }
+local function run_preview(compiler, args)
+	if compiler == "" then
+		return { "(select a compiler)" }
 	end
 
-	local glob = filetypes_to_glob(filetypes_str)
-	local all_files = {}
-	local seen = {}
+	local cmd_args = { "compiler", "test", compiler }
+	if args and args ~= "" then
+		table.insert(cmd_args, args)
+	end
 
-	for _, pattern in ipairs(patterns) do
-		local files = grep.find_files(pattern, glob, cwd, is_regex)
-		for _, file in ipairs(files) do
-			if not seen[file] then
-				seen[file] = true
-				-- Make relative
-				local display = path.relpath(file, cwd) or file
-				table.insert(all_files, display)
+	local result = cli.run(cmd_args)
+	if not result then
+		return { "(compiler test failed)" }
+	end
+
+	-- Parse output - skip header lines, show shell commands
+	local lines = {}
+	local in_output = false
+	for _, line in ipairs(result.lines) do
+		if line:match("^Output:") then
+			in_output = true
+		elseif in_output then
+			local trimmed = line:match("^%s*(.-)%s*$")
+			if trimmed and trimmed ~= "" then
+				table.insert(lines, trimmed)
 			end
 		end
 	end
 
-	if #all_files == 0 then
-		return { "(no matches)" }
+	if #lines == 0 then
+		return { "(no output)" }
 	end
 
-	table.sort(all_files)
-	return all_files
+	return lines
 end
 
----Open the query editor
----@param query table { pattern: string, glob: string|nil, regex: boolean|nil }
+---Open the query editor for compiler-based queries
+---@param query table { compiler: string|nil, args: string|nil }
 ---@param cwd string
----@param on_save fun(data: { pattern: string, filetypes: string, regex: boolean })
+---@param on_save fun(data: { compiler: string, args: string })
 function M.open(query, cwd, on_save)
-	local is_regex = query.regex or false
-	local pattern_str = query.pattern or ""
-	local filetypes_str = glob_to_filetypes(query.glob)
+	local compilers = get_compilers()
+	local compiler_idx = 1
+	local current_compiler = query.compiler or ""
+	local current_args = query.args or ""
 
-	local current_panel = 1 -- 1=pattern, 2=filetypes, 3=preview (readonly)
+	-- Find index of current compiler
+	for i, c in ipairs(compilers) do
+		if c == current_compiler then
+			compiler_idx = i
+			break
+		end
+	end
+
+	if #compilers == 0 then
+		vim.notify("No compilers available. Use 'vdir compiler add <path>' to add a container.", vim.log.levels.ERROR)
+		return
+	end
+
+	local current_panel = 1 -- 1=compiler, 2=args
 	local panels = {}
 
-	-- Pattern panel
-	panels.pattern = Popup({
+	-- Compiler panel (selection)
+	panels.compiler = Popup({
 		border = {
 			style = "rounded",
 			text = {
-				top = " Pattern [" .. (is_regex and "regex" or "literal") .. "] ",
+				top = " Compiler [" .. compiler_idx .. "/" .. #compilers .. "] ",
+				top_align = "left",
+				bottom = " <C-n>/<C-p> to change ",
+				bottom_align = "center",
+			},
+		},
+		focusable = true,
+		buf_options = {
+			modifiable = false,
+			filetype = "vdir_compiler",
+		},
+	})
+
+	-- Args panel
+	panels.args = Popup({
+		border = {
+			style = "rounded",
+			text = {
+				top = " Arguments ",
 				top_align = "left",
 			},
 		},
 		focusable = true,
 		buf_options = {
 			modifiable = true,
-			filetype = "vdir_pattern",
+			filetype = "vdir_args",
 		},
 	})
 
-	-- Filetypes panel
-	panels.filetypes = Popup({
-		border = {
-			style = "rounded",
-			text = {
-				top = " File Types ",
-				top_align = "left",
-			},
-		},
-		focusable = true,
-		buf_options = {
-			modifiable = true,
-			filetype = "vdir_filetypes",
-		},
-	})
-
-	-- Preview panel (read-only, not focusable)
+	-- Preview panel (read-only)
 	panels.preview = Popup({
 		border = {
 			style = "rounded",
 			text = {
-				top = " Preview ",
+				top = " Preview (shell commands) ",
 				top_align = "left",
-				bottom = " <CR> save │ <Esc> cancel │ <C-r> toggle regex ",
+				bottom = " <CR> save | <Esc> cancel ",
 				bottom_align = "center",
 			},
 		},
@@ -193,42 +164,45 @@ function M.open(query, cwd, on_save)
 		{
 			position = "50%",
 			size = {
-				width = 60,
+				width = 70,
 				height = 20,
 			},
 		},
 		Layout.Box({
-			Layout.Box(panels.pattern, { size = 3 }),
-			Layout.Box(panels.filetypes, { size = 3 }),
+			Layout.Box(panels.compiler, { size = 3 }),
+			Layout.Box(panels.args, { size = 3 }),
 			Layout.Box(panels.preview, { grow = 1 }),
 		}, { dir = "col" })
 	)
 
+	-- Update compiler display
+	local function update_compiler_display()
+		local comp = compilers[compiler_idx] or ""
+		vim.api.nvim_set_option_value("modifiable", true, { buf = panels.compiler.bufnr })
+		vim.api.nvim_buf_set_lines(panels.compiler.bufnr, 0, -1, false, { comp })
+		vim.api.nvim_set_option_value("modifiable", false, { buf = panels.compiler.bufnr })
+		panels.compiler.border:set_text("top", " Compiler [" .. compiler_idx .. "/" .. #compilers .. "] ", "left")
+	end
+
 	-- Update preview with debounce
 	local update_preview = debounce(function()
-		local pat = vim.api.nvim_buf_get_lines(panels.pattern.bufnr, 0, 1, false)[1] or ""
-		local ft = vim.api.nvim_buf_get_lines(panels.filetypes.bufnr, 0, 1, false)[1] or ""
-		local results = run_preview(pat, ft, is_regex, cwd)
+		local comp = compilers[compiler_idx] or ""
+		local args = vim.api.nvim_buf_get_lines(panels.args.bufnr, 0, 1, false)[1] or ""
+		local results = run_preview(comp, args)
 
 		vim.api.nvim_set_option_value("modifiable", true, { buf = panels.preview.bufnr })
 		vim.api.nvim_buf_set_lines(panels.preview.bufnr, 0, -1, false, results)
 		vim.api.nvim_set_option_value("modifiable", false, { buf = panels.preview.bufnr })
 
-		-- Update preview title with count
 		local count = #results
-		if results[1] == "(no pattern)" or results[1] == "(no matches)" then
+		if results[1] and (results[1]:match("^%(") or results[1] == "") then
 			count = 0
 		end
-		panels.preview.border:set_text("top", " Preview (" .. count .. " matches) ", "left")
+		panels.preview.border:set_text("top", " Preview (" .. count .. " shell commands) ", "left")
 	end, M.config.debounce_ms)
 
-	-- Update mode indicator
-	local function update_mode_indicator()
-		panels.pattern.border:set_text("top", " Pattern [" .. (is_regex and "regex" or "literal") .. "] ", "left")
-	end
-
-	-- Focus management (only pattern and filetypes are focusable)
-	local panel_order = { "pattern", "filetypes" }
+	-- Focus management
+	local panel_order = { "compiler", "args" }
 
 	local function focus_panel(idx)
 		current_panel = idx
@@ -246,19 +220,35 @@ function M.open(query, cwd, on_save)
 		focus_panel(prev_idx)
 	end
 
+	-- Compiler selection
+	local function next_compiler()
+		compiler_idx = compiler_idx % #compilers + 1
+		update_compiler_display()
+		update_preview()
+	end
+
+	local function prev_compiler()
+		compiler_idx = (compiler_idx - 2) % #compilers + 1
+		update_compiler_display()
+		update_preview()
+	end
+
 	-- Save function
 	local function save()
-		-- Read all lines and join (in case of accidental newlines)
-		local pat_lines = vim.api.nvim_buf_get_lines(panels.pattern.bufnr, 0, -1, false)
-		local ft_lines = vim.api.nvim_buf_get_lines(panels.filetypes.bufnr, 0, -1, false)
-		local pat = table.concat(pat_lines, " "):match("^%s*(.-)%s*$") or ""
-		local ft = table.concat(ft_lines, " "):match("^%s*(.-)%s*$") or ""
+		local comp = compilers[compiler_idx] or ""
+		if comp == "" then
+			vim.notify("Select a compiler", vim.log.levels.ERROR)
+			return
+		end
+
+		local args_lines = vim.api.nvim_buf_get_lines(panels.args.bufnr, 0, -1, false)
+		local args = table.concat(args_lines, " "):match("^%s*(.-)%s*$") or ""
+
 		vim.cmd("stopinsert")
 		layout:unmount()
 		on_save({
-			pattern = pat,
-			filetypes = ft,
-			regex = is_regex,
+			compiler = comp,
+			args = args,
 		})
 	end
 
@@ -272,18 +262,18 @@ function M.open(query, cwd, on_save)
 	layout:mount()
 
 	-- Set initial content
-	vim.api.nvim_buf_set_lines(panels.pattern.bufnr, 0, -1, false, { pattern_str })
-	vim.api.nvim_buf_set_lines(panels.filetypes.bufnr, 0, -1, false, { filetypes_str })
+	update_compiler_display()
+	vim.api.nvim_buf_set_lines(panels.args.bufnr, 0, -1, false, { current_args })
 
 	-- Initial preview
 	update_preview()
 
-	-- Setup keymaps for focusable panels only
+	-- Setup keymaps for all focusable panels
 	for _, name in ipairs(panel_order) do
 		local popup = panels[name]
 		local opts = { noremap = true, nowait = true }
 
-		-- Navigation
+		-- Navigation between panels
 		vim.keymap.set({ "n", "i" }, "<Tab>", next_panel, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 		vim.keymap.set({ "n", "i" }, "<S-Tab>", prev_panel, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 
@@ -291,30 +281,23 @@ function M.open(query, cwd, on_save)
 		vim.keymap.set("n", "q", close, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 		vim.keymap.set({ "n", "i" }, "<Esc>", close, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 
-		-- Save (Enter works in both normal and insert mode)
+		-- Save
 		vim.keymap.set({ "n", "i" }, "<CR>", save, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 		vim.keymap.set({ "n", "i" }, "<C-s>", save, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 
-		-- Toggle regex mode
-		vim.keymap.set({ "n", "i" }, "<C-r>", function()
-			is_regex = not is_regex
-			update_mode_indicator()
-			update_preview()
-		end, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
+		-- Compiler selection (works from any panel)
+		vim.keymap.set({ "n", "i" }, "<C-n>", next_compiler, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
+		vim.keymap.set({ "n", "i" }, "<C-p>", prev_compiler, vim.tbl_extend("force", opts, { buffer = popup.bufnr }))
 	end
 
-	-- Auto-update preview on text change
+	-- Auto-update preview on args change
 	vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
-		buffer = panels.pattern.bufnr,
-		callback = update_preview,
-	})
-	vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
-		buffer = panels.filetypes.bufnr,
+		buffer = panels.args.bufnr,
 		callback = update_preview,
 	})
 
-	-- Focus pattern panel and enter insert mode
-	focus_panel(1)
+	-- Focus args panel and enter insert mode (compiler is read-only)
+	focus_panel(2)
 	vim.cmd("startinsert!")
 end
 

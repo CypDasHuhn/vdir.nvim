@@ -1,4 +1,5 @@
 local ui = require("vdir.ui")
+local query_editor = require("vdir.ui.query_editor")
 local utils = require("vdir.commands.utils")
 
 local M = {}
@@ -10,19 +11,20 @@ local function get_editable_supplier(info)
 
 	if info.supplier_count == 0 then
 		return {
-			cmd = "",
 			scope = ".",
-			shell_program = "",
-			shell_execute_arg = "",
+			cmd_map = {},
+			cmd_map_order = {},
 		}, nil
 	end
 
 	if info.default_supplier then
 		return {
-			cmd = info.default_supplier.cmd or "",
 			scope = info.default_supplier.scope or ".",
-			shell_program = info.default_supplier.shell_program or "",
-			shell_execute_arg = info.default_supplier.shell_execute_arg or "",
+			compiler = info.default_supplier.compiler,
+			args = info.default_supplier.args,
+			raw = info.default_supplier.raw,
+			cmd_map = info.default_supplier.cmd_map or {},
+			cmd_map_order = info.default_supplier.cmd_map_order or {},
 		}, nil
 	end
 
@@ -97,34 +99,25 @@ function M.edit(state)
 		return
 	end
 
-	ui.show_query(query_data, function(data)
-		local cmd = vim.trim(data.cmd or "")
-		if cmd == "" then
-			vim.notify("Command cannot be empty", vim.log.levels.ERROR)
-			return
-		end
+	local cwd = utils.get_cwd(state)
 
-		local scope = vim.trim(data.scope or "")
-		if scope == "" then
-			scope = "."
-		end
+	query_editor.open({
+		compiler = query_data.compiler or "",
+		args = query_data.args or "",
+	}, cwd, function(data)
+		local compiler = data.compiler
+		local args = data.args or ""
 
-		local shell_program = vim.trim(data.shell_program or "")
-		local shell_execute_arg = vim.trim(data.shell_execute_arg or "")
+		-- Delete and recreate the query with new compiler/args
 		local commands = {
-			{ "set", ctx.query_name, "cmd", cmd },
-			{ "set", ctx.query_name, "scope", scope },
+			{ "rm", ctx.query_name },
 		}
 
-		if shell_program == "" then
-			table.insert(commands, { "set", ctx.query_name, "shell", "clear" })
-		else
-			local shell_cmd = { "set", ctx.query_name, "shell", shell_program }
-			if shell_execute_arg ~= "" then
-				table.insert(shell_cmd, shell_execute_arg)
-			end
-			table.insert(commands, shell_cmd)
+		local mkq_cmd = { "mkq", ctx.query_name, compiler }
+		if args ~= "" then
+			table.insert(mkq_cmd, args)
 		end
+		table.insert(commands, mkq_cmd)
 
 		local result = utils.run_sequence_at_marker_or_notify(state, ctx.parent_marker, commands)
 		if not result then
@@ -133,7 +126,7 @@ function M.edit(state)
 
 		vim.notify(result.stdout ~= "" and result.stdout or "query updated", vim.log.levels.INFO)
 		utils.refresh(state)
-	end, { title = " Edit Query " })
+	end)
 end
 
 M.view_query = M.edit

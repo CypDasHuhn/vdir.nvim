@@ -3,10 +3,12 @@ local NuiInput = require("nui.input")
 local M = {}
 
 ---@class QueryData
----@field cmd string|nil
 ---@field scope string|nil
----@field shell_program string|nil
----@field shell_execute_arg string|nil
+---@field compiler string|nil
+---@field args string|nil
+---@field raw boolean|nil
+---@field cmd_map table<string, string>|nil
+---@field cmd_map_order string[]|nil
 
 ---Create popup options for cursor-relative input (like neo-tree)
 ---@param title string
@@ -107,11 +109,20 @@ end
 ---@return QueryData
 local function parse_buffer(bufnr)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local data = {}
+	local data = {
+		cmd_map = {},
+	}
 	for _, line in ipairs(lines) do
-		local key, value = line:match("^([%w_]+):%s*(.*)$")
-		if key and value then
-			data[key] = value
+		-- Check for cmd:<shell> format
+		local shell_name, shell_cmd = line:match("^cmd:([%w_]+):%s*(.*)$")
+		if shell_name and shell_cmd then
+			data.cmd_map[shell_name] = shell_cmd
+		else
+			-- Regular key: value format
+			local key, value = line:match("^([%w_]+):%s*(.*)$")
+			if key and value then
+				data[key] = value
+			end
 		end
 	end
 	return data
@@ -124,16 +135,49 @@ end
 function M.show_query(query, on_save, opts)
 	opts = opts or {}
 	local lines = {
-		"cmd: " .. (query.cmd or ""),
 		"scope: " .. (query.scope or "."),
-		"shell_program: " .. (query.shell_program or ""),
-		"shell_execute_arg: " .. (query.shell_execute_arg or ""),
+		"",
+		"# Shell commands (add cmd:<shell>: <command>)",
 	}
 
+	-- Add compiler info if present (read-only info)
+	if query.compiler then
+		table.insert(lines, "# compiler: " .. query.compiler .. (query.args and (" " .. query.args) or ""))
+	end
+	if query.raw then
+		table.insert(lines, "# raw: true")
+	end
+
+	table.insert(lines, "")
+
+	-- Add existing shell commands
+	local cmd_map = query.cmd_map or {}
+	local cmd_order = query.cmd_map_order or {}
+
+	-- Use order if available, otherwise iterate
+	if #cmd_order > 0 then
+		for _, shell_name in ipairs(cmd_order) do
+			local shell_cmd = cmd_map[shell_name]
+			if shell_cmd then
+				table.insert(lines, "cmd:" .. shell_name .. ": " .. shell_cmd)
+			end
+		end
+	else
+		for shell_name, shell_cmd in pairs(cmd_map) do
+			table.insert(lines, "cmd:" .. shell_name .. ": " .. shell_cmd)
+		end
+	end
+
+	-- Add placeholder if no commands
+	if vim.tbl_isempty(cmd_map) then
+		table.insert(lines, "cmd:bash: ")
+	end
+
+	local height = math.max(#lines + 2, 8)
 	local bufnr, winnr = create_float(lines, {
 		title = opts.title or " Query ",
 		width = 80,
-		height = 6,
+		height = height,
 	})
 
 	-- Close on q or Escape

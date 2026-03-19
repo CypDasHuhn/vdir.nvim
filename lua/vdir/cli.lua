@@ -103,15 +103,10 @@ function M.parse_query_info(lines)
 		expr = "",
 		suppliers = {},
 		supplier_order = {},
-		legacy = {
-			scope = nil,
-			cmd = nil,
-			shell_program = nil,
-			shell_execute_arg = nil,
-		},
 	}
 
 	local in_suppliers = false
+	local in_cmd_map = false
 	local current_supplier = nil
 
 	for _, line in ipairs(lines) do
@@ -120,53 +115,60 @@ function M.parse_query_info(lines)
 			info.expr = expr == "(empty)" and "" or expr
 		elseif line:match("^suppliers:%s*$") then
 			in_suppliers = true
+			in_cmd_map = false
 			current_supplier = nil
 		elseif in_suppliers then
+			-- Supplier name (2 spaces indent)
 			local supplier_name = line:match("^  ([^:]+):%s*$")
 			if supplier_name then
 				current_supplier = supplier_name
-				info.suppliers[current_supplier] = { name = current_supplier }
+				info.suppliers[current_supplier] = {
+					name = current_supplier,
+					cmd_map = {},
+					cmd_map_order = {},
+				}
 				table.insert(info.supplier_order, current_supplier)
+				in_cmd_map = false
 			elseif current_supplier then
+				-- Supplier properties (4 spaces indent)
 				local scope = line:match("^    scope:%s*(.*)$")
 				if scope then
 					info.suppliers[current_supplier].scope = scope
+					in_cmd_map = false
 				end
 
-				local shell_program = line:match("^    shell%.program:%s*(.*)$")
-				if shell_program then
-					info.suppliers[current_supplier].shell_program = shell_program
+				local compiler = line:match("^    compiler:%s*(.*)$")
+				if compiler then
+					info.suppliers[current_supplier].compiler = compiler
+					in_cmd_map = false
 				end
 
-				local shell_execute_arg = line:match("^    shell%.execute_arg:%s*(.*)$")
-				if shell_execute_arg then
-					info.suppliers[current_supplier].shell_execute_arg = shell_execute_arg
+				local args = line:match("^    args:%s*(.*)$")
+				if args then
+					info.suppliers[current_supplier].args = args
+					in_cmd_map = false
 				end
 
-				local cmd = line:match("^    cmd:%s*(.*)$")
-				if cmd then
-					info.suppliers[current_supplier].cmd = cmd == "(empty)" and "" or cmd
+				local raw = line:match("^    raw:%s*(.*)$")
+				if raw then
+					info.suppliers[current_supplier].raw = raw == "true"
+					in_cmd_map = false
 				end
-			end
-		else
-			local scope = line:match("^scope:%s*(.*)$")
-			if scope then
-				info.legacy.scope = scope
-			end
 
-			local shell_program = line:match("^shell%.program:%s*(.*)$")
-			if shell_program then
-				info.legacy.shell_program = shell_program
-			end
-
-			local shell_execute_arg = line:match("^shell%.execute_arg:%s*(.*)$")
-			if shell_execute_arg then
-				info.legacy.shell_execute_arg = shell_execute_arg
-			end
-
-			local cmd = line:match("^cmd:%s*(.*)$")
-			if cmd then
-				info.legacy.cmd = cmd == "(empty)" and "" or cmd
+				if line:match("^    cmd:%s*$") then
+					-- Start of cmd map (empty after colon)
+					in_cmd_map = true
+				elseif in_cmd_map then
+					-- Shell command entry (6 spaces indent)
+					local shell_name, shell_cmd = line:match("^      ([^:]+):%s*(.*)$")
+					if shell_name and shell_cmd then
+						info.suppliers[current_supplier].cmd_map[shell_name] = shell_cmd
+						table.insert(info.suppliers[current_supplier].cmd_map_order, shell_name)
+					else
+						-- No longer in cmd map if line doesn't match
+						in_cmd_map = false
+					end
+				end
 			end
 		end
 	end
@@ -174,14 +176,6 @@ function M.parse_query_info(lines)
 	info.supplier_count = #info.supplier_order
 	if info.supplier_count > 0 then
 		info.default_supplier = info.suppliers._default
-	elseif info.legacy.cmd ~= nil or info.legacy.scope ~= nil then
-		info.default_supplier = {
-			name = "_default",
-			scope = info.legacy.scope or ".",
-			cmd = info.legacy.cmd or "",
-			shell_program = info.legacy.shell_program,
-			shell_execute_arg = info.legacy.shell_execute_arg,
-		}
 	else
 		info.default_supplier = nil
 	end
