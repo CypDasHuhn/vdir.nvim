@@ -6,6 +6,14 @@ The plugin is a thin UI wrapper around `vdir-cli`. It does not own query
 storage or execution logic anymore. `vdir` remains the source of truth for the
 virtual tree, marker state, supplier scopes, and shell execution.
 
+## AI DISCLOSURE
+
+This current branch is 100% AI generated.
+I yet didnt write a lua plugin myself, but im wanting to learn it yet.
+But since i need the utility now, i generated it.
+
+Once this disclaimer isnt here anymore, this means i have rewritten in myself.
+
 ## Requirements
 
 - [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim)
