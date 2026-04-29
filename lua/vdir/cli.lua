@@ -118,8 +118,8 @@ function M.parse_query_info(lines)
 			in_cmd_map = false
 			current_supplier = nil
 		elseif in_suppliers then
-			-- Supplier name (2 spaces indent)
-			local supplier_name = line:match("^  ([^:]+):%s*$")
+			-- Supplier name (exactly 2 spaces indent, name must not have leading spaces)
+			local supplier_name = line:match("^  ([^:%s][^:]-):%s*$")
 			if supplier_name then
 				current_supplier = supplier_name
 				info.suppliers[current_supplier] = {

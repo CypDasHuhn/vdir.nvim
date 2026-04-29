@@ -180,6 +180,9 @@ local function ensure_initialized(state, path, on_ready)
 	end)
 end
 
+M.parse_tree = parse_tree
+M.load_tree = load_tree
+
 M.navigate = function(state, path)
 	if path == nil then
 		path = vim.fn.getcwd()

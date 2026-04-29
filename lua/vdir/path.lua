@@ -6,10 +6,11 @@ local sep = package.config:sub(1, 1)
 ---@param p string
 ---@return string
 function M.normalize(p)
+	p = p or ""
 	if vim.fs and vim.fs.normalize then
 		return vim.fs.normalize(p)
 	end
-	return (p or ""):gsub("\\", "/")
+	return p:gsub("\\", "/")
 end
 
 ---@param base string
