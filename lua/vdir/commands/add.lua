@@ -108,7 +108,8 @@ function M.add_reference(state)
 		return
 	end
 
-	ui.path_input("Reference path", vim.fn.expand("%:p"), function(path)
+	local cwd = utils.get_cwd(state) .. "/"
+	ui.path_input("Reference path", cwd, function(path)
 		create_reference(state, marker, path)
 	end)
 end

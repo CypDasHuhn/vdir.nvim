@@ -205,29 +205,20 @@ function M.show_query(query, on_save, opts)
 	vim.cmd("startinsert!")
 end
 
-local function complete_path(line)
-	local completions = vim.fn.getcompletion(line, "file")
-	if #completions == 0 then
-		return nil
+function M.path_complete(findstart, base)
+	if findstart == 1 then
+		local line = vim.fn.getline(".")
+		local col = vim.fn.col(".") - 1
+		local before = line:sub(1, col)
+		local start = #before - (#before:match("[^%s]*$") or 0)
+		return start > 0 and start or 0
+	else
+		return vim.fn.getcompletion(base, "file")
 	end
-	if #completions == 1 then
-		return completions[1]
-	end
-	local common = completions[1]
-	for i = 2, #completions do
-		while completions[i]:sub(1, #common) ~= common do
-			common = common:sub(1, -2)
-		end
-		if common == "" then
-			return nil
-		end
-	end
-	return common ~= line and common or nil
 end
 
 function M.path_input(title, default_value, on_submit)
 	local width = 60
-	local opts = popup_options(title, width)
 
 	local input = NuiInput({
 		relative = "editor",
@@ -257,6 +248,8 @@ function M.path_input(title, default_value, on_submit)
 
 	input:mount()
 
+	vim.bo[input.bufnr].completefunc = "v:lua.require'vdir.ui'.path_complete"
+
 	input:map("n", "<Esc>", function()
 		input:unmount()
 	end, { noremap = true })
@@ -266,11 +259,10 @@ function M.path_input(title, default_value, on_submit)
 	end, { noremap = true })
 
 	input:map("i", "<Tab>", function()
-		local line = vim.api.nvim_get_current_line()
-		local completed = complete_path(line)
-		if completed then
-			vim.api.nvim_set_current_line(completed)
-			vim.api.nvim_win_set_cursor(0, { 1, #completed })
+		if vim.fn.pumvisible() == 1 then
+			vim.api.nvim_feedkeys(vim.keycode("<C-n>"), "n", true)
+		else
+			vim.api.nvim_feedkeys(vim.keycode("<C-x><C-u>"), "n", true)
 		end
 	end, { noremap = true })
 
