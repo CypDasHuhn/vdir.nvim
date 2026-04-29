@@ -44,4 +44,29 @@ M.icon = function(config, node, state)
 	}
 end
 
+M.name = function(config, node, state)
+	if node.extra and node.extra.is_query_result then
+		local highlight = config.highlight or highlights.FILE_NAME
+		local mode = state.path_display_mode or "filename"
+
+		local text
+		if mode == "filename" then
+			text = vim.fn.fnamemodify(node.path, ":t")
+		elseif mode == "relative" then
+			local root = state.path or vim.fn.getcwd()
+			local rel = vim.fs.relpath(node.path, root)
+			text = rel or node.path
+		else -- "full"
+			text = node.path
+		end
+
+		return {
+			text = text,
+			highlight = highlight,
+		}
+	end
+
+	return common.name(config, node, state)
+end
+
 return vim.tbl_deep_extend("force", common, M)

@@ -188,6 +188,7 @@ M.navigate = function(state, path)
 		path = vim.fn.getcwd()
 	end
 	state.path = path
+	state.path_display_mode = state.path_display_mode or "filename"
 
 	ensure_initialized(state, path, function()
 		local result, err = load_tree(path)
@@ -213,7 +214,7 @@ end
 
 local disabled_keys = {
 	"<C-b>", "<C-f>", "<C-r>", "<C-x>",
-	"A", "C", "D", "H", "P", "R", "S",
+	"A", "C", "D", "H", "R", "S",
 	"[g", "]g",
 	"b", "c", "d", "f", "i", "m", "o",
 	"oc", "od", "og", "om", "on", "os", "ot",
@@ -230,7 +231,9 @@ mappings["A"] = "add_folder"
 mappings["d"] = "delete"
 mappings["e"] = "edit"
 mappings["l"] = "add_reference"
+mappings["P"] = "toggle_path_display"
 mappings["r"] = "rename"
+mappings["W"] = "toggle_auto_expand_width"
 
 M.default_config = {
 	window = {

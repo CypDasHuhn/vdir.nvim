@@ -21,6 +21,7 @@ M.view_query = edit.view_query -- backward compat
 
 -- Utility commands
 M.refresh = utils.refresh
+M.toggle_path_display = utils.toggle_path_display
 
 -- Add common neo-tree commands
 cc._add_common_commands(M)

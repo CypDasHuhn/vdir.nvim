@@ -11,6 +11,20 @@ function M.refresh(state)
 	manager.refresh("vdir", state)
 end
 
+function M.toggle_path_display(state)
+	local modes = { "filename", "relative", "full" }
+	local current = state.path_display_mode or "filename"
+	for i, mode in ipairs(modes) do
+		if mode == current then
+			local next_mode = modes[i % #modes + 1]
+			state.path_display_mode = next_mode
+			vim.notify("Path display: " .. next_mode, vim.log.levels.INFO)
+			break
+		end
+	end
+	manager.refresh("vdir", state)
+end
+
 function M.get_node_context(node)
 	if not node then
 		return nil, "No node selected"
