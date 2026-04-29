@@ -30,6 +30,9 @@ describe("vdir commands", function()
 					on_submit("newname")
 				end
 			end,
+			path_input = function(title, default_value, on_submit)
+				on_submit("/home/user/project/main.rs")
+			end,
 		}
 		package.loaded["vdir.commands.add"] = nil
 		package.loaded["vdir.commands.delete"] = nil
@@ -247,6 +250,103 @@ describe("vdir commands", function()
 
 			add_cmd.add_folder(state)
 			assert.is_true(mkdir_called)
+		end)
+	end)
+
+	describe("l — Add reference", function()
+		it("errors on query node", function()
+			local node = make_mock_tree_node({
+				type = "directory",
+				extra = { item_type = "query", marker = "~/myquery" },
+			})
+			local state = make_mock_state(node)
+			local notified = nil
+			vim.notify = function(msg, level)
+				notified = { msg = msg, level = level }
+			end
+
+			add_cmd.add_reference(state)
+			assert.is_not_nil(notified)
+		end)
+
+		it("errors on reference node", function()
+			local node = make_mock_tree_node({
+				extra = { item_type = "reference" },
+			})
+			local state = make_mock_state(node)
+			local notified = nil
+			vim.notify = function(msg, level)
+				notified = { msg = msg, level = level }
+			end
+
+			add_cmd.add_reference(state)
+			assert.is_not_nil(notified)
+		end)
+
+		it("errors on query result node", function()
+			local node = make_mock_tree_node({
+				name = "/path/to/file.rs",
+				type = "file",
+				extra = { is_query_result = true },
+			})
+			local state = make_mock_state(node)
+			local notified = nil
+			vim.notify = function(msg, level)
+				notified = { msg = msg, level = level }
+			end
+
+			add_cmd.add_reference(state)
+			assert.is_not_nil(notified)
+		end)
+
+		it("creates a reference on root node", function()
+			local ln_called = false
+			local cli = require("vdir.cli")
+			cli.run = function(args)
+				if args[1] == "ln" then
+					ln_called = true
+				end
+				if args[1] == "pwd" then
+					return { stdout = "~", lines = { "~" } }, nil
+				end
+				return { stdout = "", lines = {} }, nil
+			end
+
+			local node = make_mock_tree_node({
+				type = "directory",
+				extra = { is_root = true, marker = "~" },
+			})
+			local state = make_mock_state(node)
+			local refreshed = false
+			package.loaded["neo-tree.sources.manager"] = {
+				refresh = function() refreshed = true end,
+			}
+
+			add_cmd.add_reference(state)
+			assert.is_true(ln_called)
+		end)
+
+		it("creates a reference inside a folder node", function()
+			local ln_called = false
+			local cli = require("vdir.cli")
+			cli.run = function(args)
+				if args[1] == "ln" then
+					ln_called = true
+				end
+				if args[1] == "pwd" then
+					return { stdout = "~", lines = { "~" } }, nil
+				end
+				return { stdout = "", lines = {} }, nil
+			end
+
+			local node = make_mock_tree_node({
+				type = "directory",
+				extra = { item_type = "folder", marker = "~/subdir" },
+			})
+			local state = make_mock_state(node)
+
+			add_cmd.add_reference(state)
+			assert.is_true(ln_called)
 		end)
 	end)
 

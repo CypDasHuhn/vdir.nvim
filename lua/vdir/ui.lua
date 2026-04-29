@@ -205,4 +205,76 @@ function M.show_query(query, on_save, opts)
 	vim.cmd("startinsert!")
 end
 
+local function complete_path(line)
+	local completions = vim.fn.getcompletion(line, "file")
+	if #completions == 0 then
+		return nil
+	end
+	if #completions == 1 then
+		return completions[1]
+	end
+	local common = completions[1]
+	for i = 2, #completions do
+		while completions[i]:sub(1, #common) ~= common do
+			common = common:sub(1, -2)
+		end
+		if common == "" then
+			return nil
+		end
+	end
+	return common ~= line and common or nil
+end
+
+function M.path_input(title, default_value, on_submit)
+	local width = 60
+	local opts = popup_options(title, width)
+
+	local input = NuiInput({
+		relative = "editor",
+		position = {
+			row = math.floor(vim.o.lines / 2) - 1,
+			col = math.floor((vim.o.columns - width) / 2),
+		},
+		size = width,
+		border = {
+			style = "rounded",
+			text = {
+				top = " " .. title .. " ",
+				top_align = "left",
+				bottom = " Tab to autocomplete | Enter=ok | Esc=cancel ",
+				bottom_align = "center",
+			},
+		},
+	}, {
+		prompt = " ",
+		default_value = default_value or "",
+		on_submit = function(value)
+			if value and value ~= "" then
+				on_submit(value)
+			end
+		end,
+	})
+
+	input:mount()
+
+	input:map("n", "<Esc>", function()
+		input:unmount()
+	end, { noremap = true })
+
+	input:map("i", "<Esc>", function()
+		input:unmount()
+	end, { noremap = true })
+
+	input:map("i", "<Tab>", function()
+		local line = vim.api.nvim_get_current_line()
+		local completed = complete_path(line)
+		if completed then
+			vim.api.nvim_set_current_line(completed)
+			vim.api.nvim_win_set_cursor(0, { 1, #completed })
+		end
+	end, { noremap = true })
+
+	vim.cmd("startinsert!")
+end
+
 return M

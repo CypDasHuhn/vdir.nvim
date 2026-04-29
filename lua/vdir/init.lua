@@ -215,7 +215,7 @@ local disabled_keys = {
 	"<C-b>", "<C-f>", "<C-r>", "<C-x>",
 	"A", "C", "D", "H", "P", "R", "S",
 	"[g", "]g",
-	"b", "c", "d", "f", "i", "l", "m", "o",
+	"b", "c", "d", "f", "i", "m", "o",
 	"oc", "od", "og", "om", "on", "os", "ot",
 	"p", "q", "r", "s", "t", "w", "x", "y", "z",
 }
@@ -229,6 +229,7 @@ mappings["a"] = "add"
 mappings["A"] = "add_folder"
 mappings["d"] = "delete"
 mappings["e"] = "edit"
+mappings["l"] = "add_reference"
 mappings["r"] = "rename"
 
 M.default_config = {

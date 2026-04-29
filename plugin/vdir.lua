@@ -48,7 +48,11 @@ local function ensure_vdir_source()
 	local new_sources = vim.deepcopy(cfg.sources or {})
 	table.insert(new_sources, "vdir")
 
-	local merged = vim.tbl_deep_extend("force", {}, cfg, { sources = new_sources })
+	local vdir_mod = require("vdir")
+	local merged = vim.tbl_deep_extend("force", {}, cfg, {
+		sources = new_sources,
+		vdir = vdir_mod.default_config or {},
+	})
 
 	if merged.source_selector and merged.source_selector.sources then
 		local selector_has_vdir = false

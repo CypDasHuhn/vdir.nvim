@@ -9,6 +9,7 @@ local M = {}
 -- Add commands
 M.add = add.add
 M.add_folder = add.add_folder
+M.add_reference = add.add_reference
 
 -- Delete commands
 M.delete = delete.delete

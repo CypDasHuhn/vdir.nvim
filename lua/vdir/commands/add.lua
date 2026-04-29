@@ -91,4 +91,26 @@ function M.add_folder(state)
 	end)
 end
 
+local function create_reference(state, marker, path)
+	local result = utils.run_at_marker_or_notify(state, marker, { "ln", path })
+	if not result then
+		return
+	end
+	vim.notify(result.stdout ~= "" and result.stdout or "reference created", vim.log.levels.INFO)
+	utils.refresh(state)
+end
+
+function M.add_reference(state)
+	local node = state.tree:get_node()
+	local marker, err = get_parent_marker(node)
+	if not marker then
+		vim.notify(err, vim.log.levels.ERROR)
+		return
+	end
+
+	ui.path_input("Reference path", vim.fn.expand("%:p"), function(path)
+		create_reference(state, marker, path)
+	end)
+end
+
 return M

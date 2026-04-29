@@ -95,9 +95,12 @@ function M.mock_cli(overrides)
 			if args[1] == "rm" then
 				return { stdout = "item deleted", lines = { "item deleted" } }, nil
 			end
-			if args[1] == "mv" then
-				return { stdout = "item renamed", lines = { "item renamed" } }, nil
-			end
+		if args[1] == "mv" then
+			return { stdout = "item renamed", lines = { "item renamed" } }, nil
+		end
+		if args[1] == "ln" then
+			return { stdout = "reference created", lines = { "reference created" } }, nil
+		end
 			if args[1] == "mkq" then
 				return { stdout = "query created", lines = { "query created" } }, nil
 			end
