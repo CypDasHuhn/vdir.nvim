@@ -54,7 +54,7 @@ M.name = function(config, node, state)
 			text = vim.fn.fnamemodify(node.path, ":t")
 		elseif mode == "relative" then
 			local root = state.path or vim.fn.getcwd()
-			local rel = vim.fs.relpath(node.path, root)
+			local rel = vim.fs.relpath(root, node.path)
 			text = rel or node.path
 		else -- "full"
 			text = node.path
